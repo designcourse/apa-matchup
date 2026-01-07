@@ -366,34 +366,40 @@ export const useSyncStore = create<SyncState>()(
             }
           }
           
-          // Step 6: Fetch lifetime stats via GraphQL
-          set({ syncProgress: 94, syncMessage: 'Fetching lifetime stats...' });
+          // Step 6: Fetch lifetime stats via backend proxy (bypasses CORS)
+          set({ syncProgress: 94, syncMessage: 'Fetching lifetime stats via proxy...' });
           
           const aliasIds = [...new Set(memberToAliasMap.values())];
           
-          console.log(`Fetching lifetime stats for ${aliasIds.length} aliases via GraphQL`);
+          console.log(`Fetching lifetime stats for ${aliasIds.length} aliases via backend proxy`);
           
-          // Fetch in batches of 5 to avoid rate limiting
-          for (let i = 0; i < aliasIds.length; i += 5) {
-            const batch = aliasIds.slice(i, i + 5);
+          // Fetch in batches of 10 (proxy handles the batching)
+          for (let i = 0; i < aliasIds.length; i += 10) {
+            const batch = aliasIds.slice(i, i + 10);
             try {
               const aliasStatsArray = await apaClient.getMultipleAliasLifetimeStats(batch);
               
-              for (const stats of aliasStatsArray) {
-                if (!stats?.alias) continue;
+              for (const response of aliasStatsArray) {
+                // Proxy returns { data: { alias: ... } } format
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const alias = (response as any)?.data?.alias || (response as any)?.alias;
+                if (!alias) {
+                  console.log('No alias data in response');
+                  continue;
+                }
                 
-                const aliasId = stats.alias.id;
+                const aliasId = alias.id;
                 // Get NineBall or EightBall stats based on format
                 const lifetimeStats = FORMAT === 'NINE' 
-                  ? stats.alias.NineBallStats?.[0]
-                  : stats.alias.EightBallStats?.[0];
+                  ? alias.NineBallStats?.[0]
+                  : alias.EightBallStats?.[0];
                 
                 if (!lifetimeStats) {
                   console.log(`No ${FORMAT} lifetime stats for alias ${aliasId}`);
                   continue;
                 }
                 
-                console.log(`Got lifetime stats for alias ${aliasId}: ${lifetimeStats.matchesWon}W/${lifetimeStats.matchesPlayed}P`);
+                console.log(`✅ Got lifetime stats for alias ${aliasId} (${alias.displayName}): ${lifetimeStats.matchesWon}W/${lifetimeStats.matchesPlayed}P`);
                 
                 // Calculate win percentage
                 const lifetimeWinPct = lifetimeStats.matchesPlayed > 0
@@ -411,6 +417,7 @@ export const useSyncStore = create<SyncState>()(
                         lifetimeWinPct: lifetimeWinPct,
                         lifetimeDefensiveAvg: lifetimeStats.defensiveShotAvg,
                       });
+                      console.log(`Updated player ${player.name} with lifetime stats`);
                     }
                   }
                 }

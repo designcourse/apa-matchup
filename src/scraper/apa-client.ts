@@ -3,6 +3,11 @@
 const REST_API_URL = 'https://api.poolplayers.com';
 const GRAPHQL_URL = 'https://gql.poolplayers.com/graphql';
 
+// Backend proxy URL - use this for requests that need CORS bypass (lifetime stats)
+const PROXY_URL = import.meta.env.PROD 
+  ? 'https://apa-matchup-backend.onrender.com'
+  : 'http://localhost:3001';
+
 // GraphQL Response Types (based on actual APA API)
 export interface GQLViewer {
   id: number;
@@ -624,79 +629,64 @@ class APAClient {
     return this.graphql(operations);
   }
 
-  // Get lifetime stats for an alias (no $format parameter - query both types directly)
+  // Get lifetime stats for an alias via backend proxy (bypasses CORS)
   async getAliasLifetimeStats(aliasId: number): Promise<GQLAliasStats> {
-    const query = `
-      query AliasSessionStats($id: Int!) {
-        alias(id: $id) {
-          id
-          displayName
-          EightBallStats {
-            id
-            matchesWon
-            matchesPlayed
-            CLA
-            defensiveShotAvg
-            matchCountForLastTwoYrs
-            lastPlayed
-            __typename
-          }
-          NineBallStats {
-            id
-            matchesWon
-            matchesPlayed
-            CLA
-            defensiveShotAvg
-            matchCountForLastTwoYrs
-            lastPlayed
-            __typename
-          }
-          __typename
-        }
-      }
-    `;
-    return this.graphqlSingle('AliasSessionStats', query, { id: aliasId });
+    if (!this.authToken) {
+      throw new Error('Authentication required');
+    }
+
+    const response = await fetch(`${PROXY_URL}/api/lifetime-stats/${aliasId}`, {
+      headers: {
+        'Authorization': this.authToken,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Proxy request failed: ${response.status}`);
+    }
+
+    const result = await response.json();
+    
+    if (result.errors) {
+      throw new Error(`GraphQL error: ${result.errors.map((e: { message: string }) => e.message).join('; ')}`);
+    }
+
+    return result;
   }
 
-  // Batch fetch lifetime stats for multiple aliases
+  // Batch fetch lifetime stats for multiple aliases via backend proxy
   async getMultipleAliasLifetimeStats(aliasIds: number[]): Promise<GQLAliasStats[]> {
-    const query = `
-      query AliasSessionStats($id: Int!) {
-        alias(id: $id) {
-          id
-          displayName
-          EightBallStats {
-            id
-            matchesWon
-            matchesPlayed
-            CLA
-            defensiveShotAvg
-            matchCountForLastTwoYrs
-            lastPlayed
-            __typename
-          }
-          NineBallStats {
-            id
-            matchesWon
-            matchesPlayed
-            CLA
-            defensiveShotAvg
-            matchCountForLastTwoYrs
-            lastPlayed
-            __typename
-          }
-          __typename
+    if (!this.authToken) {
+      throw new Error('Authentication required');
+    }
+
+    const response = await fetch(`${PROXY_URL}/api/lifetime-stats/batch`, {
+      method: 'POST',
+      headers: {
+        'Authorization': this.authToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ aliasIds }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Proxy batch request failed: ${response.status}`);
+    }
+
+    const results = await response.json();
+    
+    // Handle array of results
+    if (Array.isArray(results)) {
+      return results.map(result => {
+        if (result.errors) {
+          console.warn('GraphQL error in batch:', result.errors);
+          return { data: { alias: null } };
         }
-      }
-    `;
-    
-    const operations = aliasIds.map(id => ({
-      operationName: 'AliasSessionStats',
-      query,
-      variables: { id },
-    }));
-    
-    return this.graphql<GQLAliasStats>(operations);
+        return result;
+      });
+    }
+
+    return results;
   }
 
   // Get member's lifetime stats (deprecated - use getAliasLifetimeStats instead)
