@@ -14,7 +14,8 @@ export interface Team {
 }
 
 export interface Player {
-  id: number; // Player alias ID (e.g., 90911771)
+  id: number; // Player ID (session-specific, e.g., 90911771)
+  aliasId: number; // Alias ID (for lifetime stats, e.g., 3197629)
   memberId: number; // Member ID (e.g., 3359842)
   memberNumber: string; // Display number (e.g., "44526698")
   name: string;
@@ -26,15 +27,11 @@ export interface Player {
   ppm: number; // Points per match
   pa: number; // Points awarded (decimal 0-1, multiply by 100 for %)
   winPct: number; // Calculated from matchesWon/matchesPlayed
-  // Lifetime stats (from member profile)
+  // Lifetime stats (from alias NineBallStats)
   lifetimeMatchesPlayed?: number;
   lifetimeMatchesWon?: number;
   lifetimeWinPct?: number;
-  lifetimePpm?: number;
   lifetimeDefensiveAvg?: number;
-  lifetimeBreakAndRuns?: number;
-  lifetimeNineOnSnap?: number;
-  lifetimeShutouts?: number;
 }
 
 // Individual match result from player history

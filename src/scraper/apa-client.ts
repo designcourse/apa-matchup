@@ -41,7 +41,7 @@ export interface GQLTeam {
 }
 
 export interface GQLPlayer {
-  id: number; // This is the player alias ID
+  id: number; // This is the player ID (session-specific)
   memberNumber: string;
   displayName: string;
   matchesWon: number;
@@ -50,7 +50,30 @@ export interface GQLPlayer {
   ppm: number; // Points per match
   skillLevel: number;
   member: { id: number };
+  alias?: { id: number }; // The alias ID (for lifetime stats)
   __typename: string;
+}
+
+// Lifetime stats from alias query
+export interface GQLNineBallLifetimeStats {
+  id: number;
+  matchesWon: number;
+  matchesPlayed: number;
+  CLA: number;
+  defensiveShotAvg: number;
+  matchCountForLastTwoYrs: number;
+  lastPlayed: string | null;
+  __typename: string;
+}
+
+export interface GQLAliasStats {
+  alias: {
+    id: number;
+    displayName: string;
+    NineBallStats: GQLNineBallLifetimeStats[];
+    EightBallStats: GQLNineBallLifetimeStats[];
+    __typename: string;
+  };
 }
 
 export interface GQLMatch {
@@ -380,6 +403,10 @@ class APAClient {
               id
               __typename
             }
+            alias {
+              id
+              __typename
+            }
             ... on NineBallPlayer {
               pa
               ppm
@@ -552,7 +579,82 @@ class APAClient {
     };
   }
 
-  // Get member's lifetime stats
+  // Get alias lifetime stats (this is where lifetime win/loss data lives)
+  async getAliasLifetimeStats(aliasId: number): Promise<GQLAliasStats> {
+    const query = `
+      query AliasLifetimeStats($id: Int!) {
+        alias(id: $id) {
+          id
+          displayName
+          NineBallStats {
+            id
+            matchesWon
+            matchesPlayed
+            CLA
+            defensiveShotAvg
+            matchCountForLastTwoYrs
+            lastPlayed
+            __typename
+          }
+          EightBallStats {
+            id
+            matchesWon
+            matchesPlayed
+            CLA
+            defensiveShotAvg
+            matchCountForLastTwoYrs
+            lastPlayed
+            __typename
+          }
+          __typename
+        }
+      }
+    `;
+    return this.graphqlSingle('AliasLifetimeStats', query, { id: aliasId });
+  }
+
+  // Batch fetch lifetime stats for multiple aliases
+  async getMultipleAliasLifetimeStats(aliasIds: number[]): Promise<GQLAliasStats[]> {
+    const query = `
+      query AliasLifetimeStats($id: Int!) {
+        alias(id: $id) {
+          id
+          displayName
+          NineBallStats {
+            id
+            matchesWon
+            matchesPlayed
+            CLA
+            defensiveShotAvg
+            matchCountForLastTwoYrs
+            lastPlayed
+            __typename
+          }
+          EightBallStats {
+            id
+            matchesWon
+            matchesPlayed
+            CLA
+            defensiveShotAvg
+            matchCountForLastTwoYrs
+            lastPlayed
+            __typename
+          }
+          __typename
+        }
+      }
+    `;
+    
+    const operations = aliasIds.map(id => ({
+      operationName: 'AliasLifetimeStats',
+      query,
+      variables: { id },
+    }));
+    
+    return this.graphql<GQLAliasStats>(operations);
+  }
+
+  // Get member's lifetime stats (deprecated - use getAliasLifetimeStats instead)
   async getMemberStats(memberId: number, format: 'NINE' | 'EIGHT' = 'NINE'): Promise<GQLMemberStats> {
     const query = `
       query memberStats($id: Int!, $format: FormatType!) {

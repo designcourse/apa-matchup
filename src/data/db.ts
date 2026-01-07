@@ -32,10 +32,10 @@ class MatchUpDatabase extends Dexie {
   constructor() {
     super('MatchUpDB');
     
-    // Version 3: Added player history tables
-    this.version(3).stores({
+    // Version 4: Added aliasId to players for lifetime stats
+    this.version(4).stores({
       teams: 'id, number, divisionId, isOurTeam',
-      players: 'id, memberId, memberNumber, teamId',
+      players: 'id, aliasId, memberId, memberNumber, teamId',
       playerStats: '++id, playerId, sessionId, [playerId+sessionId]',
       playerMatchRecords: 'id, playerId, opponentId, datePlayed',
       playerSessionStats: '++id, playerId, memberId, sessionId, [playerId+sessionId]',

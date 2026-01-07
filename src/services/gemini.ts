@@ -61,11 +61,8 @@ function buildMatchContext(
     // Lifetime stats (if available)
     if (p.lifetimeMatchesPlayed && p.lifetimeMatchesPlayed > 0) {
       const lifetimeLosses = p.lifetimeMatchesPlayed - (p.lifetimeMatchesWon || 0);
-      stats += `    LIFETIME: ${p.lifetimeMatchesWon || 0}W-${lifetimeLosses}L (${(p.lifetimeWinPct || 0).toFixed(0)}% win), PPM: ${(p.lifetimePpm || 0).toFixed(1)}`;
+      stats += `    LIFETIME: ${p.lifetimeMatchesWon || 0}W-${lifetimeLosses}L (${(p.lifetimeWinPct || 0).toFixed(0)}% win)`;
       if (p.lifetimeDefensiveAvg) stats += `, Def Avg: ${p.lifetimeDefensiveAvg.toFixed(2)}`;
-      if (p.lifetimeBreakAndRuns) stats += `, B&R: ${p.lifetimeBreakAndRuns}`;
-      if (p.lifetimeNineOnSnap) stats += `, 9-snap: ${p.lifetimeNineOnSnap}`;
-      if (p.lifetimeShutouts) stats += `, Shutouts: ${p.lifetimeShutouts}`;
       stats += '\n';
     }
     
