@@ -26,12 +26,15 @@ export interface Player {
   ppm: number; // Points per match
   pa: number; // Points awarded (decimal 0-1, multiply by 100 for %)
   winPct: number; // Calculated from matchesWon/matchesPlayed
-  // Aggregated historical stats (last 4 sessions)
-  historyMatchesPlayed?: number;
-  historyMatchesWon?: number;
-  historyWinPct?: number;
-  historyPpm?: number;
-  sessionsPlayed?: number; // Number of sessions with data
+  // Lifetime stats (from member profile)
+  lifetimeMatchesPlayed?: number;
+  lifetimeMatchesWon?: number;
+  lifetimeWinPct?: number;
+  lifetimePpm?: number;
+  lifetimeDefensiveAvg?: number;
+  lifetimeBreakAndRuns?: number;
+  lifetimeNineOnSnap?: number;
+  lifetimeShutouts?: number;
 }
 
 // Individual match result from player history

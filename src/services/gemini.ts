@@ -10,8 +10,8 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-// Model to use - Gemini 3 Flash for speed and cost efficiency
-const MODEL_ID = 'gemini-2.0-flash';
+// Model to use - Gemini 3 Pro for best quality recommendations
+const MODEL_ID = 'gemini-3-pro-preview';
 
 export interface AIRecommendation {
   recommendedPlayerId: number;
@@ -43,8 +43,9 @@ function buildMatchContext(
   headToHead: Map<string, HeadToHead>,
   opponentThrown?: Player
 ): string {
-  const ourTeamStats = ourPlayers.map(p => {
-    const h2hRecords = theirPlayers.map(opp => {
+  // Build detailed stats for each player including lifetime data
+  const buildPlayerStats = (p: Player, opponents: Player[]) => {
+    const h2hRecords = opponents.map(opp => {
       const key = `${p.id}-${opp.id}`;
       const h2h = headToHead.get(key);
       if (h2h && h2h.totalGames > 0) {
@@ -53,12 +54,30 @@ function buildMatchContext(
       return null;
     }).filter(Boolean);
 
-    return `- ${p.name} (SL${p.skillLevel}): ${p.matchesWon}W-${p.matchesPlayed - p.matchesWon}L (${p.winPct.toFixed(0)}% win rate), PPM: ${p.ppm.toFixed(1)}, PA: ${(p.pa * 100).toFixed(0)}%${h2hRecords.length > 0 ? `. H2H: ${h2hRecords.join(', ')}` : ''}`;
-  }).join('\n');
+    // Current session stats
+    let stats = `- ${p.name} (SL${p.skillLevel}):\n`;
+    stats += `    Current Session: ${p.matchesWon}W-${p.matchesPlayed - p.matchesWon}L (${p.winPct.toFixed(0)}% win), PPM: ${p.ppm.toFixed(1)}, PA: ${(p.pa * 100).toFixed(0)}%\n`;
+    
+    // Lifetime stats (if available)
+    if (p.lifetimeMatchesPlayed && p.lifetimeMatchesPlayed > 0) {
+      const lifetimeLosses = p.lifetimeMatchesPlayed - (p.lifetimeMatchesWon || 0);
+      stats += `    LIFETIME: ${p.lifetimeMatchesWon || 0}W-${lifetimeLosses}L (${(p.lifetimeWinPct || 0).toFixed(0)}% win), PPM: ${(p.lifetimePpm || 0).toFixed(1)}`;
+      if (p.lifetimeDefensiveAvg) stats += `, Def Avg: ${p.lifetimeDefensiveAvg.toFixed(2)}`;
+      if (p.lifetimeBreakAndRuns) stats += `, B&R: ${p.lifetimeBreakAndRuns}`;
+      if (p.lifetimeNineOnSnap) stats += `, 9-snap: ${p.lifetimeNineOnSnap}`;
+      if (p.lifetimeShutouts) stats += `, Shutouts: ${p.lifetimeShutouts}`;
+      stats += '\n';
+    }
+    
+    if (h2hRecords.length > 0) {
+      stats += `    Head-to-Head: ${h2hRecords.join(', ')}\n`;
+    }
+    
+    return stats;
+  };
 
-  const theirTeamStats = theirPlayers.map(p => {
-    return `- ${p.name} (SL${p.skillLevel}): ${p.matchesWon}W-${p.matchesPlayed - p.matchesWon}L (${p.winPct.toFixed(0)}% win rate), PPM: ${p.ppm.toFixed(1)}, PA: ${(p.pa * 100).toFixed(0)}%`;
-  }).join('\n');
+  const ourTeamStats = ourPlayers.map(p => buildPlayerStats(p, theirPlayers)).join('\n');
+  const theirTeamStats = theirPlayers.map(p => buildPlayerStats(p, ourPlayers)).join('\n');
 
   // Games played so far
   const gamesPlayed = liveMatch.games
@@ -76,6 +95,15 @@ function buildMatchContext(
   const ourAvailable = ourPlayers.filter(p => !ourUsedIds.has(p.id));
   const theirAvailable = theirPlayers.filter(p => !theirUsedIds.has(p.id));
 
+  // Build available player summaries with lifetime stats
+  const buildAvailableSummary = (p: Player) => {
+    let summary = `- ${p.name} (SL${p.skillLevel}): Session ${p.winPct.toFixed(0)}% win, PPM ${p.ppm.toFixed(1)}`;
+    if (p.lifetimeMatchesPlayed && p.lifetimeMatchesPlayed > 0) {
+      summary += ` | LIFETIME ${(p.lifetimeWinPct || 0).toFixed(0)}% win (${p.lifetimeMatchesPlayed} matches)`;
+    }
+    return summary;
+  };
+
   let context = `
 ## APA 9-Ball Match Analysis
 
@@ -85,12 +113,12 @@ function buildMatchContext(
 - Games needed to win: First to 3
 
 ### Our Team (Available Players)
-${ourAvailable.map(p => `- ${p.name} (SL${p.skillLevel}): ${p.winPct.toFixed(0)}% win rate, PPM: ${p.ppm.toFixed(1)}`).join('\n')}
+${ourAvailable.map(buildAvailableSummary).join('\n')}
 
 ### Their Team (Available Players)
-${theirAvailable.map(p => `- ${p.name} (SL${p.skillLevel}): ${p.winPct.toFixed(0)}% win rate, PPM: ${p.ppm.toFixed(1)}`).join('\n')}
+${theirAvailable.map(buildAvailableSummary).join('\n')}
 
-### Full Player Stats
+### Detailed Player Stats (Current Session + Historical)
 **Our Team:**
 ${ourTeamStats}
 
@@ -111,6 +139,11 @@ ${theirTeamStats}
   }
 
   context += `
+### Data Available
+- Current Session: Stats from this APA session only
+- LIFETIME: Career stats across ALL sessions the player has ever played
+- Head-to-Head: Past matchup records between specific players (when available)
+
 ### APA 9-Ball Handicap System
 In APA 9-ball, lower skill levels need fewer points to win (SL1 needs 14 points, SL9 needs 75 points).
 A lower skill level player has a built-in handicap advantage against higher skill levels.
@@ -173,27 +206,42 @@ Available player IDs: ${JSON.stringify(ourAvailable.map(p => ({ id: p.id, name: 
       contents: prompt,
       config: {
         temperature: 0.7,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 8192, // Gemini 3 uses tokens for thinking, need more headroom
       },
     });
 
+    // Get text from response
     const text = response.text?.trim() || '';
     
-    // Try to parse JSON from response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      return {
-        recommendedPlayerId: parsed.recommendedPlayerId,
-        recommendedPlayerName: parsed.recommendedPlayerName,
-        winProbability: Math.max(0, Math.min(1, parsed.winProbability)),
-        confidence: parsed.confidence || 'medium',
-        reasoning: Array.isArray(parsed.reasoning) ? parsed.reasoning : [parsed.reasoning],
-        alternativePicks: parsed.alternativePicks || [],
-        strategicNotes: parsed.strategicNotes || '',
-      };
+    // Try to parse JSON from response - handle markdown code blocks
+    let jsonStr = text;
+    
+    // Remove markdown code blocks if present
+    const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1].trim();
     }
     
+    // Try to find JSON object
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          recommendedPlayerId: parsed.recommendedPlayerId,
+          recommendedPlayerName: parsed.recommendedPlayerName,
+          winProbability: Math.max(0, Math.min(1, parsed.winProbability || 0.5)),
+          confidence: parsed.confidence || 'medium',
+          reasoning: Array.isArray(parsed.reasoning) ? parsed.reasoning : [parsed.reasoning || 'AI recommendation'],
+          alternativePicks: parsed.alternativePicks || [],
+          strategicNotes: parsed.strategicNotes || '',
+        };
+      } catch (parseErr) {
+        console.error('JSON parse error:', parseErr, 'Text:', jsonMatch[0].substring(0, 200));
+      }
+    }
+    
+    console.error('Could not find JSON in response:', text.substring(0, 500));
     throw new Error('Could not parse AI response');
   } catch (error) {
     console.error('AI recommendation error:', error);
@@ -250,7 +298,7 @@ Respond conversationally but stay focused on match strategy.`;
       contents: prompt,
       config: {
         temperature: 0.8,
-        maxOutputTokens: 512,
+        maxOutputTokens: 4096, // Gemini 3 uses tokens for thinking
       },
     });
 
@@ -271,13 +319,16 @@ export async function getAICoinTossRecommendation(
 ): Promise<{ recommendation: 'throw_first' | 'defer'; reasoning: string[] }> {
   const client = getClient();
 
-  const ourStats = ourPlayers.map(p => 
-    `${p.name} (SL${p.skillLevel}): ${p.winPct.toFixed(0)}% win, PPM ${p.ppm.toFixed(1)}`
-  ).join('\n');
-  
-  const theirStats = theirPlayers.map(p => 
-    `${p.name} (SL${p.skillLevel}): ${p.winPct.toFixed(0)}% win, PPM ${p.ppm.toFixed(1)}`
-  ).join('\n');
+  const buildPlayerLine = (p: Player) => {
+    let line = `${p.name} (SL${p.skillLevel}): Session ${p.winPct.toFixed(0)}% win, PPM ${p.ppm.toFixed(1)}`;
+    if (p.lifetimeMatchesPlayed && p.lifetimeMatchesPlayed > 0) {
+      line += ` | LIFETIME ${(p.lifetimeWinPct || 0).toFixed(0)}% win (${p.lifetimeMatchesPlayed} matches)`;
+    }
+    return line;
+  };
+
+  const ourStats = ourPlayers.map(buildPlayerLine).join('\n');
+  const theirStats = theirPlayers.map(buildPlayerLine).join('\n');
 
   const prompt = `APA 9-Ball Coin Toss Strategy
 
@@ -306,19 +357,32 @@ Respond in JSON format:
       contents: prompt,
       config: {
         temperature: 0.7,
-        maxOutputTokens: 256,
+        maxOutputTokens: 4096, // Gemini 3 uses tokens for thinking
       },
     });
 
     const text = response.text?.trim() || '';
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      return {
-        recommendation: parsed.recommendation === 'throw_first' ? 'throw_first' : 'defer',
-        reasoning: Array.isArray(parsed.reasoning) ? parsed.reasoning : [parsed.reasoning],
-      };
+    
+    // Remove markdown code blocks if present
+    let jsonStr = text;
+    const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1].trim();
     }
+    
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          recommendation: parsed.recommendation === 'throw_first' ? 'throw_first' : 'defer',
+          reasoning: Array.isArray(parsed.reasoning) ? parsed.reasoning : [parsed.reasoning || 'Strategic decision'],
+        };
+      } catch (parseErr) {
+        console.error('Coin toss JSON parse error:', parseErr);
+      }
+    }
+    console.error('Could not parse coin toss response:', text.substring(0, 300));
     throw new Error('Could not parse response');
   } catch (error) {
     console.error('Coin toss AI error:', error);

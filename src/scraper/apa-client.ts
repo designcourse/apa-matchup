@@ -149,6 +149,32 @@ export interface GQLMemberSessionHistory {
   };
 }
 
+// Member lifetime stats
+export interface GQLMemberStatsData {
+  matchesWon: number;
+  matchesPlayed: number;
+  winPercentage: number;
+  defensiveShotAverage: number;
+  breakAndRuns: number;
+  nineOnTheSnap: number;
+  miniSlams: number;
+  shutouts: number;
+  pointsPerMatch: number;
+  pointsAwarded: number;
+  __typename: string;
+}
+
+export interface GQLMemberStats {
+  member: {
+    id: number;
+    firstName: string;
+    lastName: string;
+    memberNumber: string;
+    stats: GQLMemberStatsData | null;
+    __typename: string;
+  };
+}
+
 // REST API types (legacy, for public endpoints)
 export interface APAScheduleItem {
   ScheduleDate: string;
@@ -524,6 +550,72 @@ class APAClient {
       roster: results[0].team,
       schedule: results[1].team,
     };
+  }
+
+  // Get member's lifetime stats
+  async getMemberStats(memberId: number, format: 'NINE' | 'EIGHT' = 'NINE'): Promise<GQLMemberStats> {
+    const query = `
+      query memberStats($id: Int!, $format: FormatType!) {
+        member(id: $id) {
+          id
+          firstName
+          lastName
+          memberNumber
+          stats(format: $format) {
+            matchesWon
+            matchesPlayed
+            winPercentage
+            defensiveShotAverage
+            breakAndRuns
+            nineOnTheSnap
+            miniSlams
+            shutouts
+            pointsPerMatch
+            pointsAwarded
+            __typename
+          }
+          __typename
+        }
+      }
+    `;
+    return this.graphqlSingle('memberStats', query, { id: memberId, format });
+  }
+
+  // Fetch multiple members' lifetime stats
+  async getMultipleMemberStats(memberIds: number[], format: 'NINE' | 'EIGHT' = 'NINE'): Promise<GQLMemberStats[]> {
+    const query = `
+      query memberStats($id: Int!, $format: FormatType!) {
+        member(id: $id) {
+          id
+          firstName
+          lastName
+          memberNumber
+          stats(format: $format) {
+            matchesWon
+            matchesPlayed
+            winPercentage
+            defensiveShotAverage
+            breakAndRuns
+            nineOnTheSnap
+            miniSlams
+            shutouts
+            pointsPerMatch
+            pointsAwarded
+            __typename
+          }
+          __typename
+        }
+      }
+    `;
+    
+    const operations = memberIds.map(id => ({
+      operationName: 'memberStats',
+      query,
+      variables: { id, format },
+    }));
+    
+    const results = await this.graphql<GQLMemberStats>(operations);
+    return results;
   }
 
   // Get player's match history (individual game results)

@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { db, updateSyncStatus, getSyncStatus } from '../data/db';
-import { apaClient, type GQLTeam, type GQLPlayer, type GQLMatch, type GQLMatchHistoryItem } from '../scraper/apa-client';
+import { apaClient, type GQLTeam, type GQLPlayer, type GQLMatch } from '../scraper/apa-client';
 import { MY_TEAM_ID, MY_DIVISION_ID, FORMAT, seedInitialData } from '../data/seed';
-import type { SyncStatus, Team, Player, Match, PlayerMatchRecord, HeadToHead } from '../data/types';
+import type { SyncStatus, Team, Player, Match } from '../data/types';
 
 interface SyncState {
   // Status
@@ -62,23 +62,6 @@ function transformPlayer(gqlPlayer: GQLPlayer, teamId: number): Player {
     ppm: gqlPlayer.ppm,
     pa: gqlPlayer.pa,
     winPct,
-  };
-}
-
-// Transform GQL match history item to our PlayerMatchRecord type
-function transformMatchHistory(item: GQLMatchHistoryItem, playerId: number): PlayerMatchRecord {
-  return {
-    id: item.id,
-    playerId,
-    datePlayed: new Date(item.datePlayed),
-    won: item.won,
-    skillLevel: item.skillLevel,
-    pointsAwarded: item.pointsAwarded,
-    pointsNeeded: item.pointsNeeded,
-    opponentId: item.opponent.id,
-    opponentName: item.opponent.displayName,
-    opponentSkillLevel: item.opponent.skillLevel,
-    matchWeek: item.match?.week,
   };
 }
 
@@ -330,95 +313,49 @@ export const useSyncStore = create<SyncState>()(
             }
           }
           
-          // Step 5: Fetch player match history for all players
-          set({ syncProgress: 92, syncMessage: 'Fetching player match histories...' });
+          // Step 5: Fetch lifetime stats for all players
+          set({ syncProgress: 92, syncMessage: 'Fetching lifetime stats...' });
           
           const allPlayers = await db.players.toArray();
-          const allPlayerIds = allPlayers.map(p => p.id);
+          const memberIds = [...new Set(allPlayers.map(p => p.memberId))];
           
           // Fetch in batches of 5 to avoid rate limiting
-          const allMatchRecords: PlayerMatchRecord[] = [];
-          const headToHeadMap = new Map<string, HeadToHead>();
-          
-          for (let i = 0; i < allPlayerIds.length; i += 5) {
-            const batch = allPlayerIds.slice(i, i + 5);
+          for (let i = 0; i < memberIds.length; i += 5) {
+            const batch = memberIds.slice(i, i + 5);
             try {
-              const histories = await apaClient.getMultiplePlayerHistories(batch);
+              const memberStats = await apaClient.getMultipleMemberStats(batch, FORMAT);
               
-              for (const history of histories) {
-                if (!history?.player?.matchHistory) continue;
+              for (const stats of memberStats) {
+                if (!stats?.member?.stats) continue;
                 
-                const playerId = history.player.id;
+                const memberId = stats.member.id;
+                const lifetime = stats.member.stats;
                 
-                // Transform and store match records
-                for (const item of history.player.matchHistory) {
-                  const record = transformMatchHistory(item, playerId);
-                  allMatchRecords.push(record);
-                  
-                  // Build head-to-head records
-                  const h2hKey = `${playerId}-${item.opponent.id}`;
-                  const existing = headToHeadMap.get(h2hKey);
-                  if (existing) {
-                    existing.totalGames++;
-                    if (item.won) existing.wins++;
-                    else existing.losses++;
-                    existing.avgPointsScored = (existing.avgPointsScored * (existing.totalGames - 1) + item.pointsAwarded) / existing.totalGames;
-                    existing.avgPointsNeeded = (existing.avgPointsNeeded * (existing.totalGames - 1) + item.pointsNeeded) / existing.totalGames;
-                    if (new Date(item.datePlayed) > existing.lastPlayed) {
-                      existing.lastPlayed = new Date(item.datePlayed);
-                    }
-                  } else {
-                    headToHeadMap.set(h2hKey, {
-                      playerId,
-                      opponentId: item.opponent.id,
-                      totalGames: 1,
-                      wins: item.won ? 1 : 0,
-                      losses: item.won ? 0 : 1,
-                      avgPointsScored: item.pointsAwarded,
-                      avgPointsNeeded: item.pointsNeeded,
-                      lastPlayed: new Date(item.datePlayed),
-                    });
-                  }
-                }
-                
-                // Update player with aggregated history stats
-                const playerRecords = history.player.matchHistory;
-                if (playerRecords.length > 0) {
-                  const historyWins = playerRecords.filter(r => r.won).length;
-                  const historyPlayed = playerRecords.length;
-                  const historyPpm = playerRecords.reduce((sum, r) => sum + r.pointsAwarded, 0) / historyPlayed;
-                  
-                  const player = await db.players.get(playerId);
-                  if (player) {
-                    await db.players.update(playerId, {
-                      historyMatchesPlayed: historyPlayed,
-                      historyMatchesWon: historyWins,
-                      historyWinPct: (historyWins / historyPlayed) * 100,
-                      historyPpm: historyPpm,
-                    });
-                  }
+                // Update all players with this memberId
+                const playersToUpdate = allPlayers.filter(p => p.memberId === memberId);
+                for (const player of playersToUpdate) {
+                  await db.players.update(player.id, {
+                    lifetimeMatchesPlayed: lifetime.matchesPlayed,
+                    lifetimeMatchesWon: lifetime.matchesWon,
+                    lifetimeWinPct: lifetime.winPercentage,
+                    lifetimePpm: lifetime.pointsPerMatch,
+                    lifetimeDefensiveAvg: lifetime.defensiveShotAverage,
+                    lifetimeBreakAndRuns: lifetime.breakAndRuns,
+                    lifetimeNineOnSnap: lifetime.nineOnTheSnap,
+                    lifetimeShutouts: lifetime.shutouts,
+                  });
                 }
               }
               
-              const histProgress = 92 + Math.round(((i + batch.length) / allPlayerIds.length) * 5);
+              const progress = 92 + Math.round(((i + batch.length) / memberIds.length) * 5);
               set({ 
-                syncProgress: histProgress, 
-                syncMessage: `Player history: ${i + batch.length}/${allPlayerIds.length}` 
+                syncProgress: progress, 
+                syncMessage: `Lifetime stats: ${i + batch.length}/${memberIds.length} members` 
               });
             } catch (err) {
-              console.warn('Failed to fetch history for batch:', batch, err);
-              // Continue with other batches even if one fails
+              console.warn('Failed to fetch lifetime stats for batch:', batch, err);
+              // Continue with sync even if lifetime stats fail
             }
-          }
-          
-          // Save match records and head-to-head data
-          if (allMatchRecords.length > 0) {
-            await db.playerMatchRecords.bulkPut(allMatchRecords);
-          }
-          
-          const h2hRecords = Array.from(headToHeadMap.values());
-          if (h2hRecords.length > 0) {
-            await db.headToHead.bulkPut(h2hRecords);
           }
           
           // Step 6: Update sync status
@@ -427,7 +364,6 @@ export const useSyncStore = create<SyncState>()(
           const teamsCount = await db.teams.count();
           const playersCount = await db.players.count();
           const matchesCount = await db.matches.count();
-          const matchRecordsCount = await db.playerMatchRecords.count();
           
           await updateSyncStatus({
             syncInProgress: false,
@@ -441,7 +377,7 @@ export const useSyncStore = create<SyncState>()(
           set({ 
             syncStatus: await getSyncStatus(),
             syncProgress: 100,
-            syncMessage: `Sync complete! ${teamsCount} teams, ${playersCount} players, ${matchRecordsCount} match records`,
+            syncMessage: `Sync complete! ${teamsCount} teams, ${playersCount} players, ${matchesCount} matches`,
             lastRosterSync: new Date(),
             lastScheduleSync: new Date(),
           });
