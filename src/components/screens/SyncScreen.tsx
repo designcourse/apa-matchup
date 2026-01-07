@@ -4,6 +4,8 @@ import { useSyncStore } from '../../store/sync-store';
 import { useTeamStore } from '../../store/team-store';
 import { LinearConfidence } from '../ui/ConfidenceMeter';
 import { apaClient } from '../../scraper/apa-client';
+import { db } from '../../data/db';
+import type { Player } from '../../data/types';
 
 export function SyncScreen() {
   const navigate = useNavigate();
@@ -25,6 +27,7 @@ export function SyncScreen() {
   const [tokenInput, setTokenInput] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [debugPlayer, setDebugPlayer] = useState<Player | null>(null);
 
   useEffect(() => {
     initializeData();
@@ -56,10 +59,19 @@ export function SyncScreen() {
   const handleSync = async () => {
     setIsSyncing(true);
     setTestResult(null);
+    setDebugPlayer(null);
     try {
       await syncAll(true);
       await loadTeams();
       await loadAllPlayers();
+      
+      // Pick a random player to show debug stats
+      const allPlayers = await db.players.toArray();
+      if (allPlayers.length > 0) {
+        const randomPlayer = allPlayers[Math.floor(Math.random() * allPlayers.length)];
+        setDebugPlayer(randomPlayer);
+        console.log('DEBUG - Random player stats:', randomPlayer);
+      }
     } catch (error) {
       console.error('Sync failed:', error);
     } finally {
@@ -124,6 +136,43 @@ export function SyncScreen() {
       {syncError && !isSyncing && (
         <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30">
           <p className="text-red-400 text-sm">❌ {syncError}</p>
+        </div>
+      )}
+
+      {/* Debug Player Stats - shows after sync */}
+      {debugPlayer && !isSyncing && (
+        <div className="mb-6 p-4 rounded-xl bg-purple-500/10 border border-purple-500/30">
+          <h3 className="text-purple-400 font-semibold mb-2">🔍 Debug: Random Player Stats</h3>
+          <div className="text-sm font-mono space-y-1">
+            <p className="text-white font-bold">{debugPlayer.name} (SL{debugPlayer.skillLevel})</p>
+            <p className="text-slate-400">ID: {debugPlayer.id} | Member: {debugPlayer.memberId}</p>
+            
+            <div className="mt-2 pt-2 border-t border-purple-500/30">
+              <p className="text-cyan-400 font-semibold">Current Session:</p>
+              <p className="text-slate-300">
+                {debugPlayer.matchesWon}W-{debugPlayer.matchesPlayed - debugPlayer.matchesWon}L 
+                ({debugPlayer.winPct?.toFixed(1)}% win)
+              </p>
+              <p className="text-slate-300">PPM: {debugPlayer.ppm?.toFixed(2)} | PA: {((debugPlayer.pa || 0) * 100).toFixed(0)}%</p>
+            </div>
+            
+            <div className="mt-2 pt-2 border-t border-purple-500/30">
+              <p className="text-yellow-400 font-semibold">LIFETIME Stats:</p>
+              {debugPlayer.lifetimeMatchesPlayed ? (
+                <>
+                  <p className="text-green-400">
+                    ✅ {debugPlayer.lifetimeMatchesWon}W-{(debugPlayer.lifetimeMatchesPlayed || 0) - (debugPlayer.lifetimeMatchesWon || 0)}L 
+                    ({debugPlayer.lifetimeWinPct?.toFixed(1)}% win)
+                  </p>
+                  <p className="text-slate-300">
+                    Def Avg: {debugPlayer.lifetimeDefensiveAvg?.toFixed(2) || 'N/A'}
+                  </p>
+                </>
+              ) : (
+                <p className="text-red-400">❌ NO LIFETIME STATS FOUND</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
