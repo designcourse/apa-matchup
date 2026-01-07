@@ -403,10 +403,6 @@ class APAClient {
               id
               __typename
             }
-            alias {
-              id
-              __typename
-            }
             ... on NineBallPlayer {
               pa
               ppm
@@ -579,65 +575,39 @@ class APAClient {
     };
   }
 
-  // Get alias lifetime stats (this is where lifetime win/loss data lives)
-  async getAliasLifetimeStats(aliasId: number): Promise<GQLAliasStats> {
+  // Get member's aliases (to find alias ID for lifetime stats)
+  async getMemberAliases(memberId: number): Promise<{ member: { id: number; aliases: Array<{ id: number; league: { id: number } }> } }> {
     const query = `
-      query AliasLifetimeStats($id: Int!) {
-        alias(id: $id) {
+      query MemberAliases($id: Int!) {
+        member(id: $id) {
           id
-          displayName
-          NineBallStats {
+          aliases {
             id
-            matchesWon
-            matchesPlayed
-            CLA
-            defensiveShotAvg
-            matchCountForLastTwoYrs
-            lastPlayed
-            __typename
-          }
-          EightBallStats {
-            id
-            matchesWon
-            matchesPlayed
-            CLA
-            defensiveShotAvg
-            matchCountForLastTwoYrs
-            lastPlayed
+            league {
+              id
+              __typename
+            }
             __typename
           }
           __typename
         }
       }
     `;
-    return this.graphqlSingle('AliasLifetimeStats', query, { id: aliasId });
+    return this.graphqlSingle('MemberAliases', query, { id: memberId });
   }
 
-  // Batch fetch lifetime stats for multiple aliases
-  async getMultipleAliasLifetimeStats(aliasIds: number[]): Promise<GQLAliasStats[]> {
+  // Batch fetch member aliases
+  async getMultipleMemberAliases(memberIds: number[]): Promise<Array<{ member: { id: number; aliases: Array<{ id: number; league: { id: number } }> } }>> {
     const query = `
-      query AliasLifetimeStats($id: Int!) {
-        alias(id: $id) {
+      query MemberAliases($id: Int!) {
+        member(id: $id) {
           id
-          displayName
-          NineBallStats {
+          aliases {
             id
-            matchesWon
-            matchesPlayed
-            CLA
-            defensiveShotAvg
-            matchCountForLastTwoYrs
-            lastPlayed
-            __typename
-          }
-          EightBallStats {
-            id
-            matchesWon
-            matchesPlayed
-            CLA
-            defensiveShotAvg
-            matchCountForLastTwoYrs
-            lastPlayed
+            league {
+              id
+              __typename
+            }
             __typename
           }
           __typename
@@ -645,13 +615,85 @@ class APAClient {
       }
     `;
     
-    const operations = aliasIds.map(id => ({
-      operationName: 'AliasLifetimeStats',
+    const operations = memberIds.map(id => ({
+      operationName: 'MemberAliases',
       query,
       variables: { id },
     }));
     
-    return this.graphql<GQLAliasStats>(operations);
+    return this.graphql(operations);
+  }
+
+  // Scrape lifetime stats from member profile HTML page
+  // This is needed because the GraphQL API restricts NineBallStats/EightBallStats to first-party clients
+  async scrapeLifetimeStats(
+    leagueSlug: string,
+    memberId: number, 
+    aliasId: number, 
+    format: 'NINE' | 'EIGHT' = 'NINE',
+    sessionId: number = 137
+  ): Promise<{ matchesWon: number; matchesPlayed: number; winPct: number; defensiveShotAvg: number } | null> {
+    if (!this.authToken) {
+      throw new Error('Authentication required');
+    }
+
+    const formatPath = format === 'NINE' ? 'nine' : 'eight';
+    const url = `https://league.poolplayers.com/${leagueSlug}/member/${memberId}/${aliasId}/${formatPath}/${sessionId}`;
+    
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Cookie': `access_token=${this.authToken.replace('Bearer ', '')}`,
+          'Accept': 'text/html',
+        },
+      });
+
+      if (!response.ok) {
+        console.warn(`Failed to fetch member page: ${response.status}`);
+        return null;
+      }
+
+      const html = await response.text();
+      
+      // Parse lifetime stats from HTML
+      // Looking for pattern like: <div>WON</div><div>48</div> and <div>PLAYED</div><div>75</div>
+      // And defensive shot avg
+      
+      // Match "WON" followed by a number
+      const wonMatch = html.match(/LIFETIME STATS[\s\S]*?WON[\s\S]*?<[^>]*>(\d+)</i);
+      const playedMatch = html.match(/LIFETIME STATS[\s\S]*?PLAYED[\s\S]*?<[^>]*>(\d+)</i);
+      const defAvgMatch = html.match(/Defensive shot avg lifetime[\s\S]*?<[^>]*>([\d.]+)</i);
+      
+      if (!wonMatch || !playedMatch) {
+        // Try alternate pattern - look for the stats section
+        const altWonMatch = html.match(/<span[^>]*>\s*(\d+)\s*<\/span>\s*<span[^>]*>\s*WON/i) 
+          || html.match(/WON<\/[^>]+>\s*<[^>]+>(\d+)/i);
+        const altPlayedMatch = html.match(/<span[^>]*>\s*(\d+)\s*<\/span>\s*<span[^>]*>\s*PLAYED/i)
+          || html.match(/PLAYED<\/[^>]+>\s*<[^>]+>(\d+)/i);
+        
+        if (altWonMatch && altPlayedMatch) {
+          const matchesWon = parseInt(altWonMatch[1], 10);
+          const matchesPlayed = parseInt(altPlayedMatch[1], 10);
+          const winPct = matchesPlayed > 0 ? (matchesWon / matchesPlayed) * 100 : 0;
+          const defensiveShotAvg = defAvgMatch ? parseFloat(defAvgMatch[1]) : 0;
+          
+          return { matchesWon, matchesPlayed, winPct, defensiveShotAvg };
+        }
+        
+        console.warn('Could not parse lifetime stats from HTML');
+        return null;
+      }
+
+      const matchesWon = parseInt(wonMatch[1], 10);
+      const matchesPlayed = parseInt(playedMatch[1], 10);
+      const winPct = matchesPlayed > 0 ? (matchesWon / matchesPlayed) * 100 : 0;
+      const defensiveShotAvg = defAvgMatch ? parseFloat(defAvgMatch[1]) : 0;
+
+      return { matchesWon, matchesPlayed, winPct, defensiveShotAvg };
+    } catch (error) {
+      console.error('Error scraping lifetime stats:', error);
+      return null;
+    }
   }
 
   // Get member's lifetime stats (deprecated - use getAliasLifetimeStats instead)

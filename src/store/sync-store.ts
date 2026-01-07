@@ -314,59 +314,113 @@ export const useSyncStore = create<SyncState>()(
             }
           }
           
-          // Step 5: Fetch lifetime stats for all players using alias IDs
-          set({ syncProgress: 92, syncMessage: 'Fetching lifetime stats...' });
+          // Step 5: Get member aliases to find alias IDs for lifetime stats
+          set({ syncProgress: 90, syncMessage: 'Fetching member aliases...' });
           
           const allPlayers = await db.players.toArray();
-          // Get unique alias IDs (filter out 0s from players without alias data)
-          const aliasIds = [...new Set(allPlayers.map(p => p.aliasId).filter(id => id > 0))];
+          const uniqueMemberIds = [...new Set(allPlayers.map(p => p.memberId))];
           
-          console.log(`Fetching lifetime stats for ${aliasIds.length} aliases`);
+          console.log(`Fetching aliases for ${uniqueMemberIds.length} members`);
           
-          // Fetch in batches of 5 to avoid rate limiting
-          for (let i = 0; i < aliasIds.length; i += 5) {
-            const batch = aliasIds.slice(i, i + 5);
+          // Map to store member ID -> alias ID
+          const memberToAliasMap = new Map<number, number>();
+          
+          // Get our team's league ID (reuse ourTeam from earlier)
+          const ourTeamForLeague = await db.teams.filter(t => t.isOurTeam).first();
+          const leagueId = ourTeamForLeague?.leagueId;
+          
+          // Fetch member aliases in batches
+          for (let i = 0; i < uniqueMemberIds.length; i += 5) {
+            const batch = uniqueMemberIds.slice(i, i + 5);
             try {
-              const aliasStatsArray = await apaClient.getMultipleAliasLifetimeStats(batch);
+              const memberAliasesArray = await apaClient.getMultipleMemberAliases(batch);
               
-              for (const stats of aliasStatsArray) {
-                if (!stats?.alias) continue;
+              for (const result of memberAliasesArray) {
+                if (!result?.member?.aliases) continue;
                 
-                const aliasId = stats.alias.id;
-                // Get NineBall or EightBall stats based on format
-                const lifetimeStats = FORMAT === 'NINE' 
-                  ? stats.alias.NineBallStats?.[0]
-                  : stats.alias.EightBallStats?.[0];
-                
-                if (!lifetimeStats) continue;
-                
-                // Calculate win percentage
-                const lifetimeWinPct = lifetimeStats.matchesPlayed > 0
-                  ? (lifetimeStats.matchesWon / lifetimeStats.matchesPlayed) * 100
-                  : 0;
-                
-                // Update all players with this aliasId
-                const playersToUpdate = allPlayers.filter(p => p.aliasId === aliasId);
+                const memberId = result.member.id;
+                // Find alias for our league
+                const alias = result.member.aliases.find(a => a.league?.id === leagueId);
+                if (alias) {
+                  memberToAliasMap.set(memberId, alias.id);
+                }
+              }
+              
+              const progress = 90 + Math.round(((i + batch.length) / uniqueMemberIds.length) * 3);
+              set({ 
+                syncProgress: progress, 
+                syncMessage: `Member aliases: ${i + batch.length}/${uniqueMemberIds.length}` 
+              });
+            } catch (err) {
+              console.warn('Failed to fetch member aliases for batch:', batch, err);
+            }
+          }
+          
+          console.log(`Found ${memberToAliasMap.size} aliases for lifetime stats`);
+          
+          // Update players with alias IDs
+          for (const player of allPlayers) {
+            const aliasId = memberToAliasMap.get(player.memberId);
+            if (aliasId) {
+              await db.players.update(player.id, { aliasId });
+            }
+          }
+          
+          // Step 6: Scrape lifetime stats from member profile pages
+          set({ syncProgress: 94, syncMessage: 'Scraping lifetime stats...' });
+          
+          // Get league slug and current session ID from our team
+          const leagueSlug = ourTeamForLeague?.leagueSlug || 'eoh';
+          
+          // Session ID - using current session
+          const currentSessionId = 137; // TODO: Get dynamically from league data
+          
+          console.log(`Scraping lifetime stats for ${memberToAliasMap.size} players`);
+          
+          // Create array of [memberId, aliasId] pairs
+          const memberAliasPairs = Array.from(memberToAliasMap.entries());
+          let scraped = 0;
+          
+          // Scrape one at a time with small delay to avoid rate limiting
+          for (const [memberId, aliasId] of memberAliasPairs) {
+            try {
+              const stats = await apaClient.scrapeLifetimeStats(
+                leagueSlug,
+                memberId,
+                aliasId,
+                FORMAT,
+                currentSessionId
+              );
+              
+              if (stats) {
+                // Update all players with this memberId
+                const playersToUpdate = allPlayers.filter(p => p.memberId === memberId);
                 for (const player of playersToUpdate) {
                   await db.players.update(player.id, {
-                    lifetimeMatchesPlayed: lifetimeStats.matchesPlayed,
-                    lifetimeMatchesWon: lifetimeStats.matchesWon,
-                    lifetimeWinPct: lifetimeWinPct,
-                    lifetimeDefensiveAvg: lifetimeStats.defensiveShotAvg,
+                    lifetimeMatchesPlayed: stats.matchesPlayed,
+                    lifetimeMatchesWon: stats.matchesWon,
+                    lifetimeWinPct: stats.winPct,
+                    lifetimeDefensiveAvg: stats.defensiveShotAvg,
                   });
                 }
               }
               
-              const progress = 92 + Math.round(((i + batch.length) / aliasIds.length) * 5);
+              scraped++;
+              const progress = 94 + Math.round((scraped / memberAliasPairs.length) * 4);
               set({ 
                 syncProgress: progress, 
-                syncMessage: `Lifetime stats: ${i + batch.length}/${aliasIds.length} players` 
+                syncMessage: `Lifetime stats: ${scraped}/${memberAliasPairs.length} players` 
               });
+              
+              // Small delay between requests to be nice to the server
+              await new Promise(resolve => setTimeout(resolve, 100));
             } catch (err) {
-              console.warn('Failed to fetch lifetime stats for alias batch:', batch, err);
-              // Continue with sync even if lifetime stats fail
+              console.warn(`Failed to scrape lifetime stats for member ${memberId}:`, err);
+              scraped++;
             }
           }
+          
+          console.log(`Scraped lifetime stats for ${scraped} players`);
           
           // Step 6: Update sync status
           set({ syncProgress: 98, syncMessage: 'Finalizing...' });
