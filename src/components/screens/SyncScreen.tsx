@@ -13,7 +13,6 @@ export function SyncScreen() {
     syncProgress, 
     syncMessage, 
     syncError,
-    lastScheduleSync,
     lastRosterSync,
     loadSyncStatus,
     setAuthToken,

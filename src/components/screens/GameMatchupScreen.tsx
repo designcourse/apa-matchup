@@ -34,7 +34,7 @@ export function GameMatchupScreen() {
   const [selectedOpponent, setSelectedOpponent] = useState<Player | null>(null);
   const [selectedPlayer, setSelectedPlayer] = useState<number | null>(null);
   const [aiRecommendation, setAiRecommendation] = useState<AIRecommendation | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [_isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   // Chat state

@@ -22,13 +22,13 @@ export function MatchSummaryScreen() {
   };
 
   // Get player names from IDs
-  const getPlayerName = (playerId: string | null) => {
+  const getPlayerName = (playerId: number | null) => {
     if (!playerId) return 'Unknown';
     const player = players.find(p => p.id === playerId);
     return player?.name || 'Unknown';
   };
 
-  const getPlayerSkillLevel = (playerId: string | null) => {
+  const getPlayerSkillLevel = (playerId: number | null) => {
     if (!playerId) return 0;
     const player = players.find(p => p.id === playerId);
     return player?.skillLevel || 0;

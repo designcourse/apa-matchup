@@ -65,7 +65,7 @@ export function calcWinPct(won: number, played: number): number {
 /**
  * Format skill level for display
  */
-export function formatSkillLevel(sl: number, format: 'NINE' | 'EIGHT' = 'NINE'): string {
+export function formatSkillLevel(sl: number, _format: 'NINE' | 'EIGHT' = 'NINE'): string {
   return `SL${sl}`;
 }
 

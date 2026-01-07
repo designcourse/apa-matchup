@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { db, updateSyncStatus, getSyncStatus } from '../data/db';
 import { apaClient, type GQLTeam, type GQLPlayer, type GQLMatch } from '../scraper/apa-client';
-import { MY_TEAM_ID, MY_DIVISION_ID, FORMAT, DIVISION_TEAMS, seedInitialData } from '../data/seed';
+import { MY_TEAM_ID, MY_DIVISION_ID, FORMAT, seedInitialData } from '../data/seed';
 import type { SyncStatus, Team, Player, Match } from '../data/types';
 
 interface SyncState {

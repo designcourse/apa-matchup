@@ -267,7 +267,7 @@ Respond conversationally but stay focused on match strategy.`;
 export async function getAICoinTossRecommendation(
   ourPlayers: Player[],
   theirPlayers: Player[],
-  headToHead: Map<string, HeadToHead>
+  _headToHead: Map<string, HeadToHead>
 ): Promise<{ recommendation: 'throw_first' | 'defer'; reasoning: string[] }> {
   const client = getClient();
 
