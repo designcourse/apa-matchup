@@ -77,6 +77,78 @@ export interface GQLMatch {
   __typename: string;
 }
 
+// Player match history (individual game results)
+export interface GQLMatchHistoryItem {
+  id: number;
+  datePlayed: string;
+  won: boolean;
+  skillLevel: number;
+  pointsAwarded: number;
+  pointsNeeded: number;
+  opponent: {
+    id: number;
+    displayName: string;
+    skillLevel: number;
+    __typename: string;
+  };
+  match?: {
+    id: number;
+    week: number;
+    startTime: string;
+    __typename: string;
+  };
+  team?: {
+    id: number;
+    name: string;
+    __typename: string;
+  };
+  __typename: string;
+}
+
+export interface GQLPlayerMatchHistory {
+  player: {
+    id: number;
+    displayName: string;
+    skillLevel: number;
+    memberNumber?: string;
+    matchHistory: GQLMatchHistoryItem[];
+    __typename: string;
+  };
+}
+
+// Member session history (stats across multiple sessions)
+export interface GQLSessionHistoryItem {
+  id: number;
+  skillLevel: number;
+  matchesPlayed: number;
+  matchesWon: number;
+  ppm: number;
+  pa: number;
+  session: {
+    id: number;
+    name: string;
+    year: number;
+    __typename: string;
+  };
+  team: {
+    id: number;
+    name: string;
+    number: string;
+    __typename: string;
+  };
+  __typename: string;
+}
+
+export interface GQLMemberSessionHistory {
+  member: {
+    id: number;
+    firstName: string;
+    lastName: string;
+    playerHistory: GQLSessionHistoryItem[];
+    __typename: string;
+  };
+}
+
 // REST API types (legacy, for public endpoints)
 export interface APAScheduleItem {
   ScheduleDate: string;
@@ -452,6 +524,122 @@ class APAClient {
       roster: results[0].team,
       schedule: results[1].team,
     };
+  }
+
+  // Get player's match history (individual game results)
+  async getPlayerMatchHistory(playerId: number): Promise<GQLPlayerMatchHistory> {
+    const query = `
+      query playerMatchHistory($id: Int!) {
+        player(id: $id) {
+          id
+          displayName
+          skillLevel
+          memberNumber
+          matchHistory {
+            id
+            datePlayed
+            won
+            skillLevel
+            pointsAwarded
+            pointsNeeded
+            opponent {
+              id
+              displayName
+              skillLevel
+              __typename
+            }
+            match {
+              id
+              week
+              startTime
+              __typename
+            }
+            team {
+              id
+              name
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+      }
+    `;
+    return this.graphqlSingle('playerMatchHistory', query, { id: playerId });
+  }
+
+  // Get player's session history (stats from multiple sessions)
+  async getPlayerSessionHistory(memberId: number, format: 'NINE' | 'EIGHT' = 'NINE'): Promise<GQLMemberSessionHistory> {
+    const query = `
+      query memberSessionHistory($id: Int!, $format: FormatType!) {
+        member(id: $id) {
+          id
+          firstName
+          lastName
+          playerHistory(format: $format, limit: 4) {
+            id
+            skillLevel
+            matchesPlayed
+            matchesWon
+            ppm
+            pa
+            session {
+              id
+              name
+              year
+              __typename
+            }
+            team {
+              id
+              name
+              number
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+      }
+    `;
+    return this.graphqlSingle('memberSessionHistory', query, { id: memberId, format });
+  }
+
+  // Fetch multiple players' match histories in parallel
+  async getMultiplePlayerHistories(playerIds: number[]): Promise<GQLPlayerMatchHistory[]> {
+    const query = `
+      query playerMatchHistory($id: Int!) {
+        player(id: $id) {
+          id
+          displayName
+          skillLevel
+          matchHistory {
+            id
+            datePlayed
+            won
+            skillLevel
+            pointsAwarded
+            pointsNeeded
+            opponent {
+              id
+              displayName
+              skillLevel
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+      }
+    `;
+    
+    const operations = playerIds.map(id => ({
+      operationName: 'playerMatchHistory',
+      query,
+      variables: { id },
+    }));
+    
+    const results = await this.graphql<GQLPlayerMatchHistory>(operations);
+    return results;
   }
 
   // Fetch multiple team rosters in parallel

@@ -20,11 +20,51 @@ export interface Player {
   name: string;
   skillLevel: number;
   teamId: number;
+  // Current session stats
   matchesPlayed: number;
   matchesWon: number;
   ppm: number; // Points per match
   pa: number; // Points awarded (decimal 0-1, multiply by 100 for %)
   winPct: number; // Calculated from matchesWon/matchesPlayed
+  // Aggregated historical stats (last 4 sessions)
+  historyMatchesPlayed?: number;
+  historyMatchesWon?: number;
+  historyWinPct?: number;
+  historyPpm?: number;
+  sessionsPlayed?: number; // Number of sessions with data
+}
+
+// Individual match result from player history
+export interface PlayerMatchRecord {
+  id: number;
+  playerId: number;
+  datePlayed: Date;
+  won: boolean;
+  skillLevel: number;
+  pointsAwarded: number;
+  pointsNeeded: number;
+  opponentId: number;
+  opponentName: string;
+  opponentSkillLevel: number;
+  matchWeek?: number;
+}
+
+// Session history for a player (stats per session)
+export interface PlayerSessionStats {
+  id?: number;
+  playerId: number;
+  memberId: number;
+  sessionId: number;
+  sessionName: string;
+  sessionYear: number;
+  teamId: number;
+  teamName: string;
+  skillLevel: number;
+  matchesPlayed: number;
+  matchesWon: number;
+  ppm: number;
+  pa: number;
+  winPct: number;
 }
 
 export interface PlayerStats {

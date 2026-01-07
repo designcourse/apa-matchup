@@ -3,6 +3,8 @@ import type {
   Team,
   Player,
   PlayerStats,
+  PlayerMatchRecord,
+  PlayerSessionStats,
   Match,
   GameResult,
   HeadToHead,
@@ -17,6 +19,8 @@ class MatchUpDatabase extends Dexie {
   teams!: EntityTable<Team, 'id'>;
   players!: EntityTable<Player, 'id'>;
   playerStats!: EntityTable<PlayerStats, 'id'>;
+  playerMatchRecords!: EntityTable<PlayerMatchRecord, 'id'>;
+  playerSessionStats!: EntityTable<PlayerSessionStats, 'id'>;
   matches!: EntityTable<Match, 'id'>;
   gameResults!: EntityTable<GameResult, 'id'>;
   headToHead!: EntityTable<HeadToHead, 'id'>;
@@ -28,11 +32,13 @@ class MatchUpDatabase extends Dexie {
   constructor() {
     super('MatchUpDB');
     
-    // Version 2: Using numeric IDs from APA API
-    this.version(2).stores({
+    // Version 3: Added player history tables
+    this.version(3).stores({
       teams: 'id, number, divisionId, isOurTeam',
       players: 'id, memberId, memberNumber, teamId',
       playerStats: '++id, playerId, sessionId, [playerId+sessionId]',
+      playerMatchRecords: 'id, playerId, opponentId, datePlayed',
+      playerSessionStats: '++id, playerId, memberId, sessionId, [playerId+sessionId]',
       matches: 'id, divisionId, homeTeamId, awayTeamId, week, scheduledDate',
       gameResults: '++id, matchId, playerId, opponentId, [playerId+opponentId]',
       headToHead: '++id, [playerId+opponentId]',
